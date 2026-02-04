@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.bambumonitor"
+    namespace = "com.example.Bamboozled"
     compileSdk = 36
 
     defaultConfig {

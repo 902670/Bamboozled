@@ -1,4 +1,4 @@
-package com.example.bambumonitor.ui.theme
+package com.example.Bamboozled.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

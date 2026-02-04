@@ -1,4 +1,4 @@
-package com.example.bambumonitor
+package com.example.Bamboozled
 
 import android.app.Application
 import androidx.work.Configuration

@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BambuMonitor"
+rootProject.name = "Bamboozled"
 include(":Bamboozled")

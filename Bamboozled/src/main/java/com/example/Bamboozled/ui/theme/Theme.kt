@@ -1,4 +1,4 @@
-package com.example.bambumonitor.ui.theme
+package com.example.Bamboozled.ui.theme
 
 import android.app.Activity
 import android.os.Build
@@ -14,7 +14,6 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.Typeface
 import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
