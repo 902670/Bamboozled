@@ -3,6 +3,7 @@ package com.example.Bamboozled
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Drawable
 import android.os.*
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -33,6 +34,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.NotificationCompat
 import com.example.Bamboozled.ui.theme.BambuMonitorTheme
+import com.example.bambumonitor.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
