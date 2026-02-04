@@ -20,4 +20,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "BambuMonitor"
-include(":app")
+include(":Bamboozled")

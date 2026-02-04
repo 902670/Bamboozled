@@ -65,8 +65,9 @@ data class PrinterState(
     val isIdle: Boolean = true,
     val nozzleTemp: Float = 0f,
     val bedTemp: Float = 0f,
-    val deviceName: String = "Bamboozled",
-    val lastUpdate: Long = 0L
+    val appName: String = "Bamboozled",
+    val lastUpdate: Long = 0L,
+    val deviceName: String = "null"
 )
 
 object PrinterDataManager {
@@ -177,7 +178,7 @@ fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(text = "v1.0.8", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-            Text(text = state.deviceName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text(text = state.appName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         }
         val status = state.statusText
         val color = if (status.contains("Error") || status == "Offline") MaterialTheme.colorScheme.error else if (status.contains("Connecting")) MaterialTheme.colorScheme.secondary else accentColor
