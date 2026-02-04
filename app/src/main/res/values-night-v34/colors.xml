@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="app_widget_background">@android:color/system_primary_container_dark</color>
+</resources>

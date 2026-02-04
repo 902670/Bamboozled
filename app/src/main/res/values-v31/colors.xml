@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light Mode: Matches the neutral background of themed icons -->
+    <color name="app_widget_background">@android:color/system_primary_container_light</color>
+    <!-- Light Mode: Tertiary Progress -->
+    <color name="app_widget_progress_color">@android:color/system_accent3_600</color>
+    <!-- Light Mode: Text -->
+    <color name="app_widget_text_color">@android:color/system_neutral1_900</color>
+</resources>
