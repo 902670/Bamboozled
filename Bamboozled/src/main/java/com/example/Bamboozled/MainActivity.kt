@@ -3,7 +3,6 @@ package com.example.Bamboozled
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
-import android.graphics.drawable.Drawable
 import android.os.*
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -11,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -26,6 +26,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +38,6 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.NotificationCompat
 import androidx.glance.appwidget.updateAll
 import com.example.Bamboozled.ui.theme.BambuMonitorTheme
-
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -48,10 +50,13 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json.JSONObject
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.Locale
 import java.util.concurrent.Executors
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+import kotlin.math.PI
+import kotlin.math.sin
 
 data class PrinterState(
     val progress: Int = 0,
@@ -83,7 +88,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val prefs = getSharedPreferences("bambu_prefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("bambu_prefs", MODE_PRIVATE)
         val ip = prefs.getString("ip", "")
         val code = prefs.getString("code", "")
         val serial = prefs.getString("serial", "")
@@ -195,6 +200,7 @@ fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PrinterStatusView(state: PrinterState, accentColor: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -233,6 +239,51 @@ fun PrinterStatusView(state: PrinterState, accentColor: Color) {
             StatCard(label = "Nozzle", value = "${state.nozzleTemp.toInt()}\u00B0C", modifier = Modifier.weight(1f))
             StatCard(label = "Bed", value = "${state.bedTemp.toInt()}\u00B0C", modifier = Modifier.weight(1f))
         }
+        Spacer(modifier = Modifier.height(32.dp))
+        WavySlider(
+            value = 1f,
+            onValueChange = {},
+            enabled = false,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            colors = SliderDefaults.colors(
+                disabledActiveTrackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
+@Composable
+fun WavySlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: SliderColors = SliderDefaults.colors()
+) {
+    val trackColor = if (enabled) colors.disabledActiveTrackColor else colors.disabledActiveTrackColor
+    
+    Canvas(modifier = modifier.height(24.dp)) {
+        val width = size.width * value
+        val height = size.height
+        val waveLength = 40.dp.toPx()
+        val waveAmplitude = 5.dp.toPx()
+        val centerY = height / 2
+        
+        val path = Path().apply {
+            val stepSize = 1f // px
+            val steps = width.toInt().coerceAtLeast(1)
+            for (i in 0..steps) {
+                val x = i.toFloat()
+                val y = centerY + sin(x * (2.0 * PI / waveLength)).toFloat() * waveAmplitude
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+        }
+        
+        drawPath(
+            path = path,
+            color = trackColor,
+            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        )
     }
 }
 
@@ -244,7 +295,7 @@ private fun formatRemainingTime(mins: Int): String {
 
 private fun calculateFinishTime(mins: Int): String {
     val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.MINUTE, mins)
-    return String.format("%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+    return String.format(Locale.getDefault(), "%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
 }
 
 @Composable
@@ -260,14 +311,16 @@ fun StatCard(label: String, value: String, modifier: Modifier = Modifier, contai
             Text(text = value, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = contentColor)
         }
     }
+
+
 }
 
 @Composable
 fun CardContent(ip: String, onIpChange: (String) -> Unit, code: String, onCodeChange: (String) -> Unit, serial: String, onSerialChange: (String) -> Unit, onSave: () -> Unit) {
     Column(modifier = Modifier.padding(24.dp)) {
-        OutlinedTextField(value = ip, onValueChange = onIpChange, label = { Text("IP") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = code, onValueChange = onCodeChange, label = { Text("Code") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = serial, onValueChange = onSerialChange, label = { Text("Serial") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = ip, onValueChange = onIpChange, label = { Text("IP address") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = code, onValueChange = onCodeChange, label = { Text("Access code") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = serial, onValueChange = onSerialChange, label = { Text("Serial number") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = onSave, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text("Save") }
     }
 }
@@ -282,7 +335,7 @@ class PrintProgressService : Service() {
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(NotificationChannel("print_status_v4", "Status", NotificationManager.IMPORTANCE_LOW))
         }
 
@@ -380,8 +433,6 @@ class PrintProgressService : Service() {
         return NotificationCompat.Builder(this, "print_status_v4")
             .setContentTitle(if (s.isIdle) "Printer idle" else "Printing ${s.progress}%")
             .setContentText(if (s.isIdle) "Um... Nothings printing?" else "Remaining: ${formatRemainingTime(s.remainingTimeMinutes)}")
-            .setSmallIcon(R.drawable.new_icon)
-            .setProgress(100, if (s.isIdle) 0 else s.progress, false)
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
@@ -397,7 +448,7 @@ class PrintProgressService : Service() {
             return
         }
 
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         val notification = createNotification(s)
         if (!isForeground) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
