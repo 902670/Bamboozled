@@ -12,6 +12,8 @@
     <color name="light_blue_600">#FF039BE5</color>
     <color name="light_blue_900">#FF01579B</color>
 
+    <color name="bambu_green">#FF00C853</color>
+
     <color name="app_widget_background">#FFFFFF</color>
     <color name="app_widget_inner_view_background">#FFE1F5FE</color>
     <color name="app_widget_text_color">#FF000000</color>

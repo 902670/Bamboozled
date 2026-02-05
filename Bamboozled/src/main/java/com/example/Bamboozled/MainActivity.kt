@@ -33,8 +33,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.NotificationCompat
+import androidx.glance.appwidget.updateAll
 import com.example.Bamboozled.ui.theme.BambuMonitorTheme
+
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,9 +68,13 @@ data class PrinterState(
 object PrinterDataManager {
     private val _state = MutableStateFlow(PrinterState())
     val state = _state.asStateFlow()
+    private val scope = MainScope()
 
-    fun updateState(newState: PrinterState) {
+    fun updateState(context: Context, newState: PrinterState) {
         _state.value = newState
+        scope.launch {
+            BambuWidget().updateAll(context)
+        }
     }
 }
 
@@ -102,7 +109,7 @@ class MainActivity : ComponentActivity() {
         }
         try {
             startService(intent)
-        } catch (e: Exception) { Log.e("BambuMonitor", "Service start failed", e) }
+        } catch (e: Exception) { Log.e("Bamboozled", "Service start failed", e) }
     }
 }
 
@@ -139,10 +146,10 @@ fun BambuDashboard() {
                 isRefreshing = false
             }
         },
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize().statusBarsPadding()
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
                 .verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -306,7 +313,7 @@ class PrintProgressService : Service() {
         try {
             if (!force && client?.isConnected == true) return
             
-            handler.post { PrinterDataManager.updateState(PrinterDataManager.state.value.copy(statusText = "Connecting...")) }
+            handler.post { PrinterDataManager.updateState(this, PrinterDataManager.state.value.copy(statusText = "Connecting...")) }
             
             try { client?.disconnectForcibly(200) } catch (e: Exception) {}
             client = MqttClient("ssl://$ip:8883", "BM_${serial.takeLast(4)}_${System.currentTimeMillis()%1000}", MemoryPersistence())
@@ -331,9 +338,9 @@ class PrintProgressService : Service() {
                         statusText = if (g.isNotEmpty()) g.lowercase().replaceFirstChar { it.uppercase() } else "Connected", isIdle = idle,
                         nozzleTemp = p.optDouble("nozzle_temper", s.nozzleTemp.toDouble()).toFloat(), bedTemp = p.optDouble("bed_temper", s.bedTemp.toDouble()).toFloat(),
                         lastUpdate = System.currentTimeMillis())
-                    PrinterDataManager.updateState(newState); updateNotification(newState)
+                    PrinterDataManager.updateState(this@PrintProgressService, newState); updateNotification(newState)
                 }
-                override fun connectionLost(c: Throwable?) { PrinterDataManager.updateState(PrinterDataManager.state.value.copy(statusText = "Disconnected")) }
+                override fun connectionLost(c: Throwable?) { PrinterDataManager.updateState(this@PrintProgressService, PrinterDataManager.state.value.copy(statusText = "Disconnected")) }
                 override fun deliveryComplete(p0: IMqttDeliveryToken?) {}
             })
             client?.connect(options)
@@ -343,12 +350,12 @@ class PrintProgressService : Service() {
             handler.post { 
                 val current = PrinterDataManager.state.value
                 if (current.statusText.contains("Connecting")) {
-                    PrinterDataManager.updateState(current.copy(statusText = "Connected"))
+                    PrinterDataManager.updateState(this, current.copy(statusText = "Connected"))
                 }
                 updateNotification(PrinterDataManager.state.value)
             }
         } catch (e: Exception) { 
-            handler.post { PrinterDataManager.updateState(PrinterDataManager.state.value.copy(statusText = "Error")) }
+            handler.post { PrinterDataManager.updateState(this, PrinterDataManager.state.value.copy(statusText = "Error")) }
         }
     }
 
@@ -359,7 +366,7 @@ class PrintProgressService : Service() {
                     val payload = JSONObject().put("pushing", JSONObject().put("sequence_id", "0").put("command", "push_all"))
                     client?.publish("device/${currentInfo.third}/request", MqttMessage(payload.toString().toByteArray()))
                 }
-            } catch (e: Exception) { Log.e("BambuMonitor", "Push failed", e) }
+            } catch (e: Exception) { Log.e("Bamboozled", "Push failed", e) }
         }
     }
 
@@ -372,7 +379,7 @@ class PrintProgressService : Service() {
     private fun createNotification(s: PrinterState): Notification {
         return NotificationCompat.Builder(this, "print_status_v4")
             .setContentTitle(if (s.isIdle) "Printer idle" else "Printing ${s.progress}%")
-            .setContentText(if (s.isIdle) "You're not printing anything" else "Remaining: ${formatRemainingTime(s.remainingTimeMinutes)}")
+            .setContentText(if (s.isIdle) "Um... Nothings printing?" else "Remaining: ${formatRemainingTime(s.remainingTimeMinutes)}")
             .setSmallIcon(R.drawable.new_icon)
             .setProgress(100, if (s.isIdle) 0 else s.progress, false)
             .setOngoing(true)
