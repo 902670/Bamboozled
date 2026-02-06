@@ -67,7 +67,7 @@ data class PrinterState(
     val bedTemp: Float = 0f,
     val appName: String = "Bamboozled",
     val lastUpdate: Long = 0L,
-    val deviceName: String = "null"
+    val deviceName: String = "Unknown"
 )
 
 object PrinterDataManager {
@@ -78,7 +78,11 @@ object PrinterDataManager {
     fun updateState(context: Context, newState: PrinterState) {
         _state.value = newState
         scope.launch {
-            BambuWidget().updateAll(context)
+            try {
+                BambuWidget().updateAll(context)
+            } catch (e: Exception) {
+                Log.e("Bamboozled", "Widget update failed", e)
+            }
         }
     }
 }
@@ -113,7 +117,11 @@ class MainActivity : ComponentActivity() {
             if (force) putExtra("force_reconnect", true)
         }
         try {
-            startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
         } catch (e: Exception) { Log.e("Bamboozled", "Service start failed", e) }
     }
 }
@@ -145,7 +153,11 @@ fun BambuDashboard() {
                         putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
                         putExtra("force_reconnect", true)
                     }
-                    context.startService(intent)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
                 }
                 delay(1000)
                 isRefreshing = false
@@ -181,7 +193,7 @@ fun BambuDashboard() {
 fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "v1.0.8", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+            Text(text = "v1.0.9", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             Text(text = state.appName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         }
         val status = state.statusText
@@ -249,6 +261,9 @@ fun PrinterStatusView(state: PrinterState, accentColor: Color) {
                 disabledActiveTrackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
             )
         )
+        Spacer(modifier = Modifier.height(32.dp))
+        StatCard(label = "Last Update", value = formatLastUpdate(state.lastUpdate), modifier = Modifier.fillMaxWidth())
+
     }
 }
 
@@ -260,17 +275,16 @@ fun WavySlider(
     enabled: Boolean = true,
     colors: SliderColors = SliderDefaults.colors()
 ) {
-    val trackColor = if (enabled) colors.disabledActiveTrackColor else colors.disabledActiveTrackColor
+    val trackColor = if (enabled) colors.activeTrackColor else colors.disabledActiveTrackColor
     
     Canvas(modifier = modifier.height(24.dp)) {
         val width = size.width * value
         val height = size.height
         val waveLength = 40.dp.toPx()
-        val waveAmplitude = 5.dp.toPx()
+        val waveAmplitude = 6.dp.toPx()
         val centerY = height / 2
         
         val path = Path().apply {
-            val stepSize = 1f // px
             val steps = width.toInt().coerceAtLeast(1)
             for (i in 0..steps) {
                 val x = i.toFloat()
@@ -296,6 +310,15 @@ private fun formatRemainingTime(mins: Int): String {
 private fun calculateFinishTime(mins: Int): String {
     val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.MINUTE, mins)
     return String.format(Locale.getDefault(), "%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE))
+}
+
+private fun formatLastUpdate(timestamp: Long): String {
+    if (timestamp == 0L) return "Never"
+    val diff = System.currentTimeMillis() - timestamp
+    val seconds = diff / 1000
+    if (seconds < 60) return "Just now"
+    val minutes = seconds / 60
+    return "${minutes}m ago"
 }
 
 @Composable
@@ -348,6 +371,10 @@ class PrintProgressService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val initialState = PrinterDataManager.state.value
+        startForeground(1, createNotification(initialState), if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+        isForeground = true
+
         val ip = intent?.getStringExtra("ip") ?: ""
         val code = intent?.getStringExtra("code") ?: ""
         val serial = intent?.getStringExtra("serial") ?: ""
@@ -368,11 +395,16 @@ class PrintProgressService : Service() {
             
             handler.post { PrinterDataManager.updateState(this, PrinterDataManager.state.value.copy(statusText = "Connecting...")) }
             
-            try { client?.disconnectForcibly(200) } catch (e: Exception) {}
-            client = MqttClient("ssl://$ip:8883", "BM_${serial.takeLast(4)}_${System.currentTimeMillis()%1000}", MemoryPersistence())
+            try { 
+                client?.disconnectForcibly(200)
+                client?.close()
+            } catch (e: Exception) {}
+            
+            val clientId = "BM_${serial.takeLast(4)}_${(1000..9999).random()}"
+            client = MqttClient("ssl://$ip:8883", clientId, MemoryPersistence())
             
             val options = MqttConnectOptions().apply {
-                userName = "bblp"; password = code.toCharArray(); connectionTimeout = 10; isAutomaticReconnect = true; isCleanSession = true
+                userName = "bblp"; password = code.toCharArray(); connectionTimeout = 10; isAutomaticReconnect = true; isCleanSession = true; keepAliveInterval = 30
                 val tm = arrayOf<TrustManager>(object : X509TrustManager {
                     override fun checkClientTrusted(p0: Array<out X509Certificate>?, p1: String?) {}
                     override fun checkServerTrusted(p0: Array<out X509Certificate>?, p1: String?) {}
@@ -380,30 +412,77 @@ class PrintProgressService : Service() {
                 })
                 val ssl = SSLContext.getInstance("TLS"); ssl.init(null, tm, SecureRandom()); socketFactory = ssl.socketFactory
             }
-            client?.setCallback(object : MqttCallback {
-                override fun messageArrived(t: String?, m: MqttMessage?) {
-                    val p = JSONObject(m?.toString() ?: return).optJSONObject("print") ?: return
-                    val s = PrinterDataManager.state.value
-                    val g = p.optString("gcode_state", "")
-                    val mc = p.optInt("mc_percent", s.progress)
-                    val idle = when { g == "RUNNING" || g == "PREPARE" -> false; g == "IDLE" || g == "FINISH" -> true; else -> s.isIdle }
-                    val newState = s.copy(progress = mc, remainingTimeMinutes = p.optInt("mc_remaining_time", s.remainingTimeMinutes),
-                        statusText = if (g.isNotEmpty()) g.lowercase().replaceFirstChar { it.uppercase() } else "Connected", isIdle = idle,
-                        nozzleTemp = p.optDouble("nozzle_temper", s.nozzleTemp.toDouble()).toFloat(), bedTemp = p.optDouble("bed_temper", s.bedTemp.toDouble()).toFloat(),
-                        lastUpdate = System.currentTimeMillis())
-                    PrinterDataManager.updateState(this@PrintProgressService, newState); updateNotification(newState)
+            client?.setCallback(object : MqttCallbackExtended {
+                override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                    client?.subscribe("device/$serial/report", 0)
+                    requestPush()
                 }
-                override fun connectionLost(c: Throwable?) { PrinterDataManager.updateState(this@PrintProgressService, PrinterDataManager.state.value.copy(statusText = "Disconnected")) }
+                override fun messageArrived(t: String?, m: MqttMessage?) {
+                    try {
+                        val payload = m?.toString() ?: return
+                        Log.i("Bamboozled", "MQTT Message: $payload")
+                        val root = JSONObject(payload)
+                        val s = PrinterDataManager.state.value
+                        var newState = s
+                        
+                        // Deep search for device name in all top-level objects
+                        var foundName: String? = root.optString("dev_name").takeIf { it.isNotEmpty() }
+                        if (foundName == null) {
+                            val keys = root.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                val obj = root.optJSONObject(key)
+                                if (obj != null) {
+                                    foundName = obj.optString("dev_name").takeIf { it.isNotEmpty() }
+                                             ?: obj.optString("name").takeIf { it.isNotEmpty() }
+                                    if (foundName != null) break
+                                }
+                            }
+                        }
+                        
+                        if (foundName != null) {
+                            newState = newState.copy(deviceName = foundName)
+                        }
+
+                        val p = root.optJSONObject("print")
+                        if (p != null) {
+                            val g = p.optString("gcode_state", "")
+                            val mc = p.optInt("mc_percent", newState.progress)
+                            val idle = when { g == "RUNNING" || g == "PREPARE" -> false; g == "IDLE" || g == "FINISH" -> true; else -> newState.isIdle }
+                            newState = newState.copy(
+                                progress = mc, 
+                                remainingTimeMinutes = p.optInt("mc_remaining_time", newState.remainingTimeMinutes),
+                                statusText = if (g.isNotEmpty()) g.lowercase().replaceFirstChar { it.uppercase() } else newState.statusText, 
+                                isIdle = idle,
+                                nozzleTemp = p.optDouble("nozzle_temper", newState.nozzleTemp.toDouble()).toFloat(), 
+                                bedTemp = p.optDouble("bed_temper", newState.bedTemp.toDouble()).toFloat(),
+                                lastUpdate = System.currentTimeMillis()
+                            )
+                        }
+                        
+                        if (newState != s) {
+                            PrinterDataManager.updateState(this@PrintProgressService, newState)
+                            updateNotification(newState)
+                        }
+                    } catch (e: Exception) { Log.e("Bamboozled", "Message processing failed", e) }
+                }
+                override fun connectionLost(c: Throwable?) { 
+                    PrinterDataManager.updateState(this@PrintProgressService, PrinterDataManager.state.value.copy(statusText = "Disconnected")) 
+                }
                 override fun deliveryComplete(p0: IMqttDeliveryToken?) {}
             })
             client?.connect(options)
-            client?.subscribe("device/$serial/report", 0)
-            requestPush()
             
             handler.post { 
                 val current = PrinterDataManager.state.value
-                if (current.statusText.contains("Connecting")) {
-                    PrinterDataManager.updateState(this, current.copy(statusText = "Connected"))
+                val updateStatus = current.statusText.contains("Connecting")
+                val updateName = current.deviceName == "Unknown"
+                
+                if (updateStatus || updateName) {
+                    PrinterDataManager.updateState(this, current.copy(
+                        statusText = if (updateStatus) "Connected" else current.statusText,
+                        deviceName = if (updateName) serial else current.deviceName
+                    ))
                 }
                 updateNotification(PrinterDataManager.state.value)
             }
@@ -416,8 +495,12 @@ class PrintProgressService : Service() {
         executor.execute {
             try {
                 if (client?.isConnected == true) {
-                    val payload = JSONObject().put("pushing", JSONObject().put("sequence_id", "0").put("command", "push_all"))
-                    client?.publish("device/${currentInfo.third}/request", MqttMessage(payload.toString().toByteArray()))
+                    // Send multiple commands to ensure we get metadata
+                    val pushAll = JSONObject().put("pushing", JSONObject().put("sequence_id", "0").put("command", "push_all"))
+                    client?.publish("device/${currentInfo.third}/request", MqttMessage(pushAll.toString().toByteArray()))
+                    
+                    val getVersion = JSONObject().put("info", JSONObject().put("sequence_id", "1").put("command", "get_version"))
+                    client?.publish("device/${currentInfo.third}/request", MqttMessage(getVersion.toString().toByteArray()))
                 }
             } catch (e: Exception) { Log.e("Bamboozled", "Push failed", e) }
         }
@@ -430,40 +513,31 @@ class PrintProgressService : Service() {
     }
 
     private fun createNotification(s: PrinterState): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        
         return NotificationCompat.Builder(this, "print_status_v4")
             .setContentTitle(if (s.isIdle) "Printer idle" else "Printing ${s.progress}%")
             .setContentText(if (s.isIdle) "Um... Nothings printing?" else "Remaining: ${formatRemainingTime(s.remainingTimeMinutes)}")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setProgress(100, if (s.isIdle) 0 else s.progress, s.statusText.contains("Connecting"))
             .setOngoing(true)
             .setSilent(true)
-            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(pendingIntent)
             .build()
     }
 
     private fun updateNotification(s: PrinterState) {
-        if (s.statusText == "Disconnected" || s.statusText == "Error") {
-            if (isForeground) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                isForeground = false
-            }
-            return
-        }
-
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        val notification = createNotification(s)
-        if (!isForeground) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(1, notification)
-            }
-            isForeground = true
-        } else {
-            manager.notify(1, notification)
-        }
+        manager.notify(1, createNotification(s))
     }
 
     override fun onDestroy() {
-        try { client?.disconnectForcibly(500) } catch (e: Exception) {}
+        try { 
+            client?.disconnectForcibly(500)
+            client?.close()
+        } catch (e: Exception) {}
         executor.shutdown()
         super.onDestroy()
     }
