@@ -6,14 +6,15 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.os.*
 import android.util.Log
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -35,12 +36,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.NotificationCompat
 import androidx.glance.appwidget.updateAll
 import com.example.Bamboozled.ui.theme.BambuMonitorTheme
@@ -110,11 +111,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            BambuMonitorTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    BambuDashboard()
-                }
-            }
+            BambuDashboard()
         }
     }
 
@@ -140,7 +137,6 @@ fun BambuDashboard() {
     val printerState by PrinterDataManager.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val scrollState = rememberScrollState()
     val prefs = remember { context.getSharedPreferences("bambu_prefs", Context.MODE_PRIVATE) }
 
     var ip by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
@@ -149,59 +145,93 @@ fun BambuDashboard() {
     var showSettings by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
     
-    val accentColor = MaterialTheme.colorScheme.primary
+    val accentColor = Color(0xFF00E676)
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        val intent = Intent(context, PrintProgressService::class.java).apply {
-                            putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
-                            putExtra("force_reconnect", true)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(intent)
-                        } else {
-                            context.startService(intent)
-                        }
+    SideEffect {
+        val window = (context as? Activity)?.window
+        if (window != null) {
+            if (isLandscape) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.insetsController?.let {
+                        it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                        it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     }
-                    delay(1000)
-                    isRefreshing = false
-                }
-            },
-            modifier = Modifier.fillMaxSize().statusBarsPadding()
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-                    .padding(horizontal = 24.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                HeaderSection(printerState, accentColor, onSettingsClick = { showSettings = !showSettings })
-
-                if (isLandscape) {
-                    LandscapePrinterStatusView(printerState, accentColor)
                 } else {
-                    PortraitPrinterStatusView(printerState, accentColor)
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = (
+                        android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                        or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+                }
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.insetsController?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                } else {
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
                 }
             }
         }
+    }
 
-        if (showSettings) {
-            Dialog(onDismissRequest = { showSettings = false }) {
-                Card(
-                    modifier = Modifier.width(340.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 24.dp)
+    BambuMonitorTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        isRefreshing = true
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                val intent = Intent(context, PrintProgressService::class.java).apply {
+                                    putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
+                                    putExtra("force_reconnect", true)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(intent)
+                                } else {
+                                    context.startService(intent)
+                                }
+                            }
+                            delay(1000)
+                            isRefreshing = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().displayCutoutPadding()
                 ) {
-                    CardContent(ip, { ip = it }, code, { code = it }, serial, { serial = it }) {
-                        prefs.edit().putString("ip", ip).putString("code", code).putString("serial", serial).apply()
-                        (context as? MainActivity)?.startMonitorService(ip, code, serial, force = true)
-                        showSettings = false
+                    Column(
+                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                            .padding(horizontal = 24.dp, vertical = if (isLandscape) 0.dp else 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (!isLandscape) {
+                            HeaderSection(printerState, accentColor, onSettingsClick = { showSettings = !showSettings })
+                        }
+                        
+                        if (isLandscape) {
+                            LandscapePrinterStatusView(printerState, accentColor)
+                        } else {
+                            PortraitPrinterStatusView(printerState, accentColor)
+                        }
+                    }
+                }
+
+                if (showSettings) {
+                    Dialog(onDismissRequest = { showSettings = false }) {
+                        Card(
+                            modifier = Modifier.width(340.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 24.dp)
+                        ) {
+                            CardContent(ip, { ip = it }, code, { code = it }, serial, { serial = it }) {
+                                prefs.edit().putString("ip", ip).putString("code", code).putString("serial", serial).apply()
+                                (context as? MainActivity)?.startMonitorService(ip, code, serial, force = true)
+                                showSettings = false
+                            }
+                        }
                     }
                 }
             }
@@ -213,7 +243,7 @@ fun BambuDashboard() {
 fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "v1.1.4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+            Text(text = "v1.1.6", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             Text(text = state.appName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         }
         val status = state.statusText
@@ -232,29 +262,34 @@ fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -
     }
 }
 
-
-
-
 @Composable
-fun ProgressDial(state: PrinterState, accentColor: Color, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.size(180.dp), contentAlignment = Alignment.Center) {
-
-
+fun ProgressDial(
+    state: PrinterState,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    strokeWidth: Dp = 12.dp,
+    content: @Composable (BoxScope.() -> Unit)? = null
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (state.statusText.contains("Connecting")) {
             CircularProgressIndicator(
                 modifier = Modifier.fillMaxSize(),
                 color = accentColor,
-                strokeWidth = 12.dp
+                strokeWidth = strokeWidth
             )
         } else if (state.isIdle) {
             CircularProgressIndicator(
                 progress = { 0f },
                 modifier = Modifier.fillMaxSize(),
                 color = accentColor,
-                strokeWidth = 12.dp,
+                strokeWidth = strokeWidth,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
-            Text(text = "Idle", fontSize = 44.sp, fontWeight = FontWeight.Black)
+            if (content != null) {
+                content()
+            } else {
+                Text(text = "Idle", fontSize = 44.sp, fontWeight = FontWeight.Black)
+            }
         } else {
             val filamentColor = remember(state.filamentColor) {
                 try {
@@ -264,19 +299,25 @@ fun ProgressDial(state: PrinterState, accentColor: Color, modifier: Modifier = M
                     accentColor
                 }
             }
+            
             CircularProgressIndicator(
                 progress = { state.progress / 100f },
                 modifier = Modifier.fillMaxSize(),
                 color = filamentColor,
-                strokeWidth = 12.dp,
+                strokeWidth = strokeWidth,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "${state.progress}%",
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Black
-                )
+            
+            if (content != null) {
+                content()
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${state.progress}%",
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
             }
         }
     }
@@ -294,23 +335,27 @@ fun PortraitPrinterStatusView(state: PrinterState, accentColor: Color) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            ProgressDial(state, accentColor)
+
+            ProgressDial(state, accentColor, modifier = Modifier.weight(1f).aspectRatio(1f), strokeWidth = 12.dp)
             Column(
-                modifier = Modifier.weight(1f).height(180.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.weight(1f),
             ) {
+
                 StatCard(
                     label = "Remaining",
-                    value = if (state.isIdle) "--" else formatRemainingTime(state.remainingTimeMinutes),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    value = formatRemainingTime(state.remainingTimeMinutes),
+                    modifier = Modifier.fillMaxHeight(),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+
                 )
+                Spacer(modifier = Modifier.height(16.dp))
                 StatCard(
                     label = "Finish",
-                    value = if (state.isIdle) "--" else calculateFinishTime(state.remainingTimeMinutes),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    value = calculateFinishTime(state.remainingTimeMinutes),
+                    modifier = Modifier.fillMaxHeight(),
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                 )
+
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
@@ -351,60 +396,69 @@ fun PortraitPrinterStatusView(state: PrinterState, accentColor: Color) {
 
 @Composable
 fun LandscapePrinterStatusView(state: PrinterState, accentColor: Color) {
-    val scrollState = rememberScrollState()
     Row(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        Box(modifier = Modifier.weight(0.4f), contentAlignment = Alignment.Center) {
-            ProgressDial(state, accentColor)
-        }
-        Column(
-            modifier = Modifier.weight(0.6f).fillMaxHeight().verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        // Dial on the left, perfectly aligned with the card grid
+        Box(
+            modifier = Modifier.weight(0.45f).fillMaxHeight(),
+            contentAlignment = Alignment.Center
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ProgressDial(
+                state = state,
+                accentColor = accentColor,
+                modifier = Modifier.fillMaxHeight().aspectRatio(1f),
+                strokeWidth = 32.dp
+            )
+        }
+
+        // Information cards on the right
+        Column(
+            modifier = Modifier.weight(0.55f).fillMaxHeight().padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatCard(
                     label = "Remaining",
                     value = if (state.isIdle) "--" else formatRemainingTime(state.remainingTimeMinutes),
-                    modifier = Modifier.weight(1f),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentPadding = PaddingValues(28.dp), // Matches corner radius
+                    valueFontSize = 44.sp,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 )
                 StatCard(
                     label = "Finish",
                     value = if (state.isIdle) "--" else calculateFinishTime(state.remainingTimeMinutes),
-                    modifier = Modifier.weight(1f),
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentPadding = PaddingValues(28.dp), // Matches corner radius
+                    valueFontSize = 44.sp,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatCard(
                     label = "Nozzle",
                     value = "${state.nozzleTemp.toInt()}\u00B0C",
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    contentPadding = PaddingValues(28.dp), // Matches corner radius
+                    valueFontSize = 44.sp,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 )
                 StatCard(
                     label = "Bed",
                     value = "${state.bedTemp.toInt()}\u00B0C",
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    contentPadding = PaddingValues(28.dp), // Matches corner radius
+                    valueFontSize = 44.sp,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 )
             }
-            WavySlider(
-                value = 1f,
-                onValueChange = {},
-                enabled = false,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                colors = SliderDefaults.colors(
-                    disabledActiveTrackColor =  MaterialTheme.colorScheme.inverseOnSurface
-                )
-            )
-            StatCard(
-                label = "Last Update",
-                value = formatLastUpdate(state.lastUpdate),
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            )
         }
     }
 }
@@ -452,12 +506,8 @@ private fun formatRemainingTime(mins: Int): String {
 
 private fun calculateFinishTime(mins: Int): String {
     val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.MINUTE, mins)
-    return String.format(
-        Locale.getDefault(),
-        "%02d:%02d",
-        c.get(java.util.Calendar.HOUR_OF_DAY),
-        c.get(java.util.Calendar.MINUTE)
-    )
+    val sdf = java.text.SimpleDateFormat("h:mm", Locale.getDefault())
+    return sdf.format(c.time)
 }
 
 private fun formatLastUpdate(timestamp: Long): String {
@@ -478,6 +528,10 @@ fun StatCard(
     cornerRadius: Dp = 28.dp,
     shape: Shape = RoundedCornerShape(cornerRadius),
     aspectRatio: Float? = null,
+    contentPadding: PaddingValues = PaddingValues(24.dp),
+    valueFontSize: TextUnit = 18.sp,
+    labelFontSize: TextUnit = 12.sp,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
     onClick: () -> Unit = {}
 ) {
     val contentColor = when (containerColor) {
@@ -494,20 +548,24 @@ fun StatCard(
         colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxSize().padding(contentPadding),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = horizontalAlignment
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = labelFontSize,
                 fontWeight = FontWeight.Black,
-                color = contentColor.copy(alpha = 0.8f)
+                color = contentColor.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
             )
             Text(
                 text = value,
-                fontSize = 18.sp,
+                fontSize = valueFontSize,
                 fontWeight = FontWeight.ExtraBold,
-                color = contentColor
+                color = contentColor,
+                softWrap = false,
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -579,11 +637,11 @@ class PrintProgressService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val initialState = PrinterDataManager.state.value
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, createNotification(initialState), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(1, createNotification(initialState))
-        }
+        startForeground(
+            1,
+            createNotification(initialState),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        )
         isForeground = true
 
         val ip = intent?.getStringExtra("ip") ?: ""
