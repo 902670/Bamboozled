@@ -3,12 +3,13 @@ package com.example.Bamboozled
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.os.*
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.*
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.materialIcon
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -32,11 +32,13 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.NotificationCompat
@@ -73,8 +75,7 @@ data class PrinterState(
     val appName: String = "Bamboozled",
     val lastUpdate: Long = 0L,
     val deviceName: String = "Unknown",
-    val filamentColor: String = "#00E676",
-    val filamentType: String = "Plastic I guess"
+    val filamentColor: String = "#00E676"
 )
 
 object PrinterDataManager {
@@ -149,58 +150,70 @@ fun BambuDashboard() {
     var isRefreshing by remember { mutableStateOf(false) }
     
     val accentColor = MaterialTheme.colorScheme.primary
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            scope.launch {
-                withContext(Dispatchers.IO) {
-                    val intent = Intent(context, PrintProgressService::class.java).apply {
-                        putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
-                        putExtra("force_reconnect", true)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(intent)
-                    } else {
-                        context.startService(intent)
-                    }
-                }
-                delay(1000)
-                isRefreshing = false
-            }
-        },
-        modifier = Modifier.fillMaxSize().statusBarsPadding()
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-                .verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            HeaderSection(printerState, accentColor, onSettingsClick = { showSettings = !showSettings })
-            
-            if (showSettings) {
-                Popup(alignment = Alignment.TopEnd, onDismissRequest = { showSettings = false }, properties = PopupProperties(focusable = true)) {
-                    Card(modifier = Modifier.width(320.dp).padding(top = 4.dp), shape = RoundedCornerShape(28.dp), elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)) {
-                        CardContent(ip, { ip = it }, code, { code = it }, serial, { serial = it }) {
-                            prefs.edit().putString("ip", ip).putString("code", code).putString("serial", serial).apply()
-                            (context as? MainActivity)?.startMonitorService(ip, code, serial, force = true)
-                            showSettings = false
+    Box(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        val intent = Intent(context, PrintProgressService::class.java).apply {
+                            putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
+                            putExtra("force_reconnect", true)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
+                        } else {
+                            context.startService(intent)
                         }
                     }
+                    delay(1000)
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.fillMaxSize().statusBarsPadding()
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                HeaderSection(printerState, accentColor, onSettingsClick = { showSettings = !showSettings })
+
+                if (isLandscape) {
+                    LandscapePrinterStatusView(printerState, accentColor)
+                } else {
+                    PortraitPrinterStatusView(printerState, accentColor)
                 }
             }
+        }
 
-            PrinterStatusView(printerState, accentColor)
+        if (showSettings) {
+            Dialog(onDismissRequest = { showSettings = false }) {
+                Card(
+                    modifier = Modifier.width(340.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 24.dp)
+                ) {
+                    CardContent(ip, { ip = it }, code, { code = it }, serial, { serial = it }) {
+                        prefs.edit().putString("ip", ip).putString("code", code).putString("serial", serial).apply()
+                        (context as? MainActivity)?.startMonitorService(ip, code, serial, force = true)
+                        showSettings = false
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "v1.1.1", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+            Text(text = "v1.1.4", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             Text(text = state.appName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         }
         val status = state.statusText
@@ -219,56 +232,69 @@ fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+
+
+
 @Composable
-fun PrinterStatusView(state: PrinterState, accentColor: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+fun ProgressDial(state: PrinterState, accentColor: Color, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.size(180.dp), contentAlignment = Alignment.Center) {
+
+
+        if (state.statusText.contains("Connecting")) {
+            CircularProgressIndicator(
+                modifier = Modifier.fillMaxSize(),
+                color = accentColor,
+                strokeWidth = 12.dp
+            )
+        } else if (state.isIdle) {
+            CircularProgressIndicator(
+                progress = { 0f },
+                modifier = Modifier.fillMaxSize(),
+                color = accentColor,
+                strokeWidth = 12.dp,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+            Text(text = "Idle", fontSize = 44.sp, fontWeight = FontWeight.Black)
+        } else {
+            val filamentColor = remember(state.filamentColor) {
+                try {
+                    val hex = if (state.filamentColor.startsWith("#")) state.filamentColor else "#${state.filamentColor}"
+                    Color(android.graphics.Color.parseColor(hex))
+                } catch (_: Exception) {
+                    accentColor
+                }
+            }
+            CircularProgressIndicator(
+                progress = { state.progress / 100f },
+                modifier = Modifier.fillMaxSize(),
+                color = filamentColor,
+                strokeWidth = 12.dp,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${state.progress}%",
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PortraitPrinterStatusView(state: PrinterState, accentColor: Color) {
+    val scrollState = rememberScrollState()
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(modifier = Modifier.size(180.dp), contentAlignment = Alignment.Center) {
-                if (state.statusText.contains("Connecting")) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.fillMaxSize(),
-                        color = accentColor,
-                        strokeWidth = 12.dp
-                    )
-                } else if (state.isIdle) {
-                    CircularProgressIndicator(
-                        progress = 0f,
-                        modifier = Modifier.fillMaxSize(),
-                        color = accentColor,
-                        strokeWidth = 12.dp,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                    Text(text = "Idle", fontSize = 44.sp, fontWeight = FontWeight.Black)
-                } else {
-                    val filamentColor = remember(state.filamentColor) {
-                        try {
-                            val hex = if (state.filamentColor.startsWith("#")) state.filamentColor else "#${state.filamentColor}"
-                            Color(hex.toColorInt())
-                        } catch (_: Exception) {
-                            accentColor
-                        }
-                    }
-                    CircularProgressIndicator(
-                        progress = state.progress / 100f,
-                        modifier = Modifier.fillMaxSize(),
-                        color = filamentColor,
-                        strokeWidth = 12.dp,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "${state.progress}%",
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-                }
-            }
+            ProgressDial(state, accentColor)
             Column(
                 modifier = Modifier.weight(1f).height(180.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -319,14 +345,66 @@ fun PrinterStatusView(state: PrinterState, accentColor: Color) {
             value = formatLastUpdate(state.lastUpdate),
             modifier = Modifier.fillMaxWidth(),
             containerColor = MaterialTheme.colorScheme.secondaryContainer,
-
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    }
+}
 
+@Composable
+fun LandscapePrinterStatusView(state: PrinterState, accentColor: Color) {
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = Modifier.fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        Box(modifier = Modifier.weight(0.4f), contentAlignment = Alignment.Center) {
+            ProgressDial(state, accentColor)
+        }
+        Column(
+            modifier = Modifier.weight(0.6f).fillMaxHeight().verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard(
+                    label = "Remaining",
+                    value = if (state.isIdle) "--" else formatRemainingTime(state.remainingTimeMinutes),
+                    modifier = Modifier.weight(1f),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+                StatCard(
+                    label = "Finish",
+                    value = if (state.isIdle) "--" else calculateFinishTime(state.remainingTimeMinutes),
+                    modifier = Modifier.weight(1f),
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard(
+                    label = "Nozzle",
+                    value = "${state.nozzleTemp.toInt()}\u00B0C",
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    label = "Bed",
+                    value = "${state.bedTemp.toInt()}\u00B0C",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            WavySlider(
+                value = 1f,
+                onValueChange = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                colors = SliderDefaults.colors(
+                    disabledActiveTrackColor =  MaterialTheme.colorScheme.inverseOnSurface
+                )
+            )
+            StatCard(
+                label = "Last Update",
+                value = formatLastUpdate(state.lastUpdate),
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            )
         }
     }
 }
