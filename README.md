@@ -1,3 +1,6 @@
+Please consider filling out this Google form. Your feedback will help me make Bamboozled better for everyone. It only takes a minute or two.
+https://forms.gle/Cz7xN8dNS1RTJMsx7
+
 Hi! Thanks for reading my README!
 This is my first time doing this, and this app started as a weekend project.
 If you're thinking about installing Bamboozled, here's what you need to know:
