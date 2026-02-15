@@ -8,9 +8,12 @@ import android.os.*
 import android.util.Log
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.*
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -64,7 +67,6 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import kotlin.math.PI
 import kotlin.math.sin
-import androidx.core.graphics.toColorInt
 
 data class PrinterState(
     val progress: Int = 0,
@@ -76,7 +78,7 @@ data class PrinterState(
     val appName: String = "Bamboozled",
     val lastUpdate: Long = 0L,
     val deviceName: String = "Unknown",
-    val filamentColor: String = "#00E676"
+    val filamentColor: String = "#00E676" //default placeholder color used for now
 )
 
 object PrinterDataManager {
@@ -139,6 +141,7 @@ fun BambuDashboard() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("bambu_prefs", Context.MODE_PRIVATE) }
 
+    // Use derived state or update these when prefs change to ensure UI stays in sync
     var ip by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
     var code by remember { mutableStateOf(prefs.getString("code", "") ?: "") }
     var serial by remember { mutableStateOf(prefs.getString("serial", "") ?: "") }
@@ -149,10 +152,36 @@ fun BambuDashboard() {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
+    val onRefresh = {
+        isRefreshing = true
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val intent = Intent(context, PrintProgressService::class.java).apply {
+                    putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
+                    putExtra("force_reconnect", true)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+            delay(1000)
+            isRefreshing = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (ip.isNotEmpty() && code.isNotEmpty() && serial.isNotEmpty()) {
+            onRefresh()
+        }
+    }
+
     SideEffect {
         val window = (context as? Activity)?.window
         if (window != null) {
             if (isLandscape) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     window.insetsController?.let {
                         it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
@@ -167,6 +196,7 @@ fun BambuDashboard() {
                     )
                 }
             } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     window.insetsController?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 } else {
@@ -182,24 +212,7 @@ fun BambuDashboard() {
             Box(modifier = Modifier.fillMaxSize()) {
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                val intent = Intent(context, PrintProgressService::class.java).apply {
-                                    putExtra("ip", ip); putExtra("code", code); putExtra("serial", serial)
-                                    putExtra("force_reconnect", true)
-                                }
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    context.startForegroundService(intent)
-                                } else {
-                                    context.startService(intent)
-                                }
-                            }
-                            delay(1000)
-                            isRefreshing = false
-                        }
-                    },
+                    onRefresh = { onRefresh() },
                     modifier = Modifier.fillMaxSize().statusBarsPadding().displayCutoutPadding()
                 ) {
                     Column(
@@ -208,7 +221,13 @@ fun BambuDashboard() {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if (!isLandscape) {
-                            HeaderSection(printerState, accentColor, onSettingsClick = { showSettings = !showSettings })
+                            HeaderSection(printerState, accentColor, onSettingsClick = { 
+                                // Reset local state to match current prefs before showing dialog
+                                ip = prefs.getString("ip", "") ?: ""
+                                code = prefs.getString("code", "") ?: ""
+                                serial = prefs.getString("serial", "") ?: ""
+                                showSettings = true 
+                            })
                         }
                         
                         if (isLandscape) {
@@ -227,8 +246,13 @@ fun BambuDashboard() {
                             elevation = CardDefaults.cardElevation(defaultElevation = 24.dp)
                         ) {
                             CardContent(ip, { ip = it }, code, { code = it }, serial, { serial = it }) {
-                                prefs.edit().putString("ip", ip).putString("code", code).putString("serial", serial).apply()
-                                (context as? MainActivity)?.startMonitorService(ip, code, serial, force = true)
+                                prefs.edit()
+                                    .putString("ip", ip.trim())
+                                    .putString("code", code.trim())
+                                    .putString("serial", serial.trim())
+                                    .apply()
+                                
+                                (context as? MainActivity)?.startMonitorService(ip.trim(), code.trim(), serial.trim(), force = true)
                                 showSettings = false
                             }
                         }
@@ -243,15 +267,15 @@ fun BambuDashboard() {
 fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "v1.1.6", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+            Text(text = "v1.2.2", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             Text(text = state.appName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         }
         val status = state.statusText
-        val color = if (status.contains("Error") || status == "Offline") MaterialTheme.colorScheme.error else if (status.contains("Connecting")) MaterialTheme.colorScheme.secondary else accentColor
+        val color = if (status.contains("Error") || status == "Offline") MaterialTheme.colorScheme.error else if (status.contains("Connecting")) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiaryContainer
         
         Surface(shape = RoundedCornerShape(24.dp), color = color.copy(alpha = 0.15f), modifier = Modifier.height(48.dp)) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text(text = if (status.startsWith("Connect")) "Connected" else if (status.contains("Connecting")) "Connecting" else "Offline",
+                Text(text = if (status.startsWith("Connecte")) "Connected" else if (status.contains("Connecting")) "Connecting" else "Offline",
                     style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = color)
             }
         }
@@ -268,6 +292,7 @@ fun ProgressDial(
     accentColor: Color,
     modifier: Modifier = Modifier,
     strokeWidth: Dp = 12.dp,
+    percentageFontSize: TextUnit = 44.sp,
     content: @Composable (BoxScope.() -> Unit)? = null
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -288,7 +313,7 @@ fun ProgressDial(
             if (content != null) {
                 content()
             } else {
-                Text(text = "Idle", fontSize = 44.sp, fontWeight = FontWeight.Black)
+                Text(text = "Idle", fontSize = percentageFontSize, fontWeight = FontWeight.Black)
             }
         } else {
             val filamentColor = remember(state.filamentColor) {
@@ -314,7 +339,7 @@ fun ProgressDial(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${state.progress}%",
-                        fontSize = 44.sp,
+                        fontSize = percentageFontSize,
                         fontWeight = FontWeight.Black
                     )
                 }
@@ -412,7 +437,8 @@ fun LandscapePrinterStatusView(state: PrinterState, accentColor: Color) {
                 state = state,
                 accentColor = accentColor,
                 modifier = Modifier.fillMaxHeight().aspectRatio(1f),
-                strokeWidth = 32.dp
+                strokeWidth = 32.dp,
+                percentageFontSize = 80.sp
             )
         }
 
@@ -635,6 +661,7 @@ class PrintProgressService : Service() {
         }, 15000)
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val initialState = PrinterDataManager.state.value
         startForeground(
