@@ -52,7 +52,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,7 +78,8 @@ data class PrinterState(
     val appName: String = "Bamboozled",
     val lastUpdate: Long = 0L,
     val deviceName: String = "Unknown",
-    val filamentColor: String = "#00E676" //default placeholder color used for now
+    val filamentColor: String = "#00E676",
+    val amsFilaments: List<String> = listOf ("#00E676", "#00E676", "#00E676", "#00E676")
 )
 
 object PrinterDataManager {
@@ -142,7 +142,6 @@ fun BambuDashboard() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("bambu_prefs", Context.MODE_PRIVATE) }
 
-    // Use derived state or update these when prefs change to ensure UI stays in sync
     var ip by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
     var code by remember { mutableStateOf(prefs.getString("code", "") ?: "") }
     var serial by remember { mutableStateOf(prefs.getString("serial", "") ?: "") }
@@ -223,7 +222,6 @@ fun BambuDashboard() {
                     ) {
                         if (!isLandscape) {
                             HeaderSection(printerState, accentColor, onSettingsClick = { 
-                                // Reset local state to match current prefs before showing dialog
                                 ip = prefs.getString("ip", "") ?: ""
                                 code = prefs.getString("code", "") ?: ""
                                 serial = prefs.getString("serial", "") ?: ""
@@ -400,6 +398,7 @@ fun PortraitPrinterStatusView(state: PrinterState, accentColor: Color) {
                 modifier = Modifier.weight(1f)
             )
         }
+        
         Spacer(modifier = Modifier.height(32.dp))
         WavySlider(
             value = 1f,
@@ -739,22 +738,18 @@ class PrintProgressService : Service() {
                 override fun messageArrived(t: String?, m: MqttMessage?) {
                     try {
                         val payload = m?.toString() ?: return
-                        Log.i("Bamboozled", "MQTT Message: $payload")
                         val root = JSONObject(payload)
                         val s = PrinterDataManager.state.value
                         var newState = s
 
-                        // Deep search for device name in all top-level objects
-                        var foundName: String? =
-                            root.optString("dev_name").takeIf { it.isNotEmpty() }
+                        var foundName: String? = root.optString("dev_name").takeIf { it.isNotEmpty() }
                         if (foundName == null) {
                             val keys = root.keys()
                             while (keys.hasNext()) {
                                 val key = keys.next()
                                 val obj = root.optJSONObject(key)
                                 if (obj != null) {
-                                    foundName =
-                                        obj.optString("dev_name").takeIf { it.isNotEmpty() }
+                                    foundName = obj.optString("dev_name").takeIf { it.isNotEmpty() }
                                             ?: obj.optString("name").takeIf { it.isNotEmpty() }
                                     if (foundName != null) break
                                 }
@@ -772,6 +767,25 @@ class PrintProgressService : Service() {
                             val idle = when {
                                 g == "RUNNING" || g == "PREPARE" -> false; g == "IDLE" || g == "FINISH" -> true; else -> newState.isIdle
                             }
+                            
+                            // Extract AMS Filaments
+                            val ams = p.optJSONObject("ams")
+                            val newAmsFilaments = mutableListOf<String>()
+                            if (ams != null) {
+                                val amsList = ams.optJSONArray("ams")
+                                if (amsList != null && amsList.length() > 0) {
+                                    val firstAms = amsList.getJSONObject(0)
+                                    val trays = firstAms.optJSONArray("tray")
+                                    if (trays != null) {
+                                        for (i in 0 until trays.length()) {
+                                            val tray = trays.getJSONObject(i)
+                                            val color = tray.optString("tray_color", "#808080")
+                                            newAmsFilaments.add(if (color.startsWith("#")) color else "#$color")
+                                        }
+                                    }
+                                }
+                            }
+                            
                             newState = newState.copy(
                                 progress = mc,
                                 remainingTimeMinutes = p.optInt(
@@ -788,7 +802,8 @@ class PrintProgressService : Service() {
                                 bedTemp = p.optDouble("bed_temper", newState.bedTemp.toDouble())
                                     .toFloat(),
                                 lastUpdate = System.currentTimeMillis(),
-                                filamentColor = p.optString("filament_color", newState.filamentColor)
+                                filamentColor = p.optString("filament_color", newState.filamentColor),
+                                amsFilaments = if (newAmsFilaments.isNotEmpty()) newAmsFilaments else newState.amsFilaments
                             )
                         }
 
@@ -841,24 +856,11 @@ class PrintProgressService : Service() {
         executor.execute {
             try {
                 if (client?.isConnected == true) {
-                    // Send multiple commands to ensure we get metadata
-                    val pushAll = JSONObject().put(
-                        "pushing",
-                        JSONObject().put("sequence_id", "0").put("command", "push_all")
-                    )
-                    client?.publish(
-                        "device/${currentInfo.third}/request",
-                        MqttMessage(pushAll.toString().toByteArray())
-                    )
+                    val pushAll = JSONObject().put("pushing", JSONObject().put("sequence_id", "0").put("command", "push_all"))
+                    client?.publish("device/${currentInfo.third}/request", MqttMessage(pushAll.toString().toByteArray()))
 
-                    val getVersion = JSONObject().put(
-                        "info",
-                        JSONObject().put("sequence_id", "1").put("command", "get_version")
-                    )
-                    client?.publish(
-                        "device/${currentInfo.third}/request",
-                        MqttMessage(getVersion.toString().toByteArray())
-                    )
+                    val getVersion = JSONObject().put("info", JSONObject().put("sequence_id", "1").put("command", "get_version"))
+                    client?.publish("device/${currentInfo.third}/request", MqttMessage(getVersion.toString().toByteArray()))
                 }
             } catch (e: Exception) {
                 Log.e("Bamboozled", "Push failed", e)
@@ -874,24 +876,13 @@ class PrintProgressService : Service() {
 
     private fun createNotification(s: PrinterState): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent =
-            PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, "print_status_v4")
             .setContentTitle(if (s.isIdle) "Printer idle" else "Printing ${s.progress}%")
-            .setContentText(
-                if (s.isIdle) "Um... Nothings printing?" else "Remaining: ${
-                    formatRemainingTime(
-                        s.remainingTimeMinutes
-                    )
-                }"
-            )
+            .setContentText(if (s.isIdle) "Um... Nothings printing?" else "Remaining: ${formatRemainingTime(s.remainingTimeMinutes)}")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setProgress(
-                100,
-                if (s.isIdle) 0 else s.progress,
-                s.statusText.contains("Connecting")
-            )
+            .setProgress(100, if (s.isIdle) 0 else s.progress, s.statusText.contains("Connecting"))
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -908,8 +899,7 @@ class PrintProgressService : Service() {
         try {
             client?.disconnectForcibly(500)
             client?.close()
-        } catch (e: Exception) {
-        }
+        } catch (e: Exception) {}
         executor.shutdown()
         super.onDestroy()
     }

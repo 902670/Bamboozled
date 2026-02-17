@@ -6,6 +6,6 @@
     android:minHeight="80dp"
     android:targetCellWidth="5"
     android:targetCellHeight="2"
-    android:updatePeriodMillis="500"
+    android:updatePeriodMillis="0"
     android:widgetCategory="home_screen"
     android:description="@string/app_name" />
