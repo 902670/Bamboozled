@@ -19,6 +19,7 @@ WHAT IT DOES:
 
 Bamboozled gives you a pretty little dashboard for monitoring your 3D printer.
 It follows dynamic color, looks pretty good, and best of all, puts the print progress right on your lock screen!
+I'm even working on widgets with various functions to keep tabs on your printer!
 
 *=*=*=*=*=*=*
 HOW IT WORKS:
