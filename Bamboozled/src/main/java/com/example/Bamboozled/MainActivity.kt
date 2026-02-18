@@ -10,11 +10,9 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.*
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.RequiresApi
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -91,7 +89,7 @@ object PrinterDataManager {
         _state.value = newState
         scope.launch {
             try {
-                BambuWidget().updateAll(context)
+                AMSwidget().updateAll(context)
             } catch (e: Exception) {
                 Log.e("Bamboozled", "Widget update failed", e)
             }

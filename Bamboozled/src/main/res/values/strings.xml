@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name" translatable="false">Bamboozled</string>
+    <string name="widget_descr" translatable="false">Bring the colors inside your AMS onto your home screen</string>
+    <string name="widget_name" translatable="false">AMS</string>
 </resources>
