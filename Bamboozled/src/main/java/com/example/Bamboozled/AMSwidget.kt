@@ -70,8 +70,12 @@ class AMSwidget : GlanceAppWidget() {
                 }
             }
         }
+
+
     }
 }
+
+
 
 class BambuWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = AMSwidget()
