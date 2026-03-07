@@ -90,6 +90,7 @@ object PrinterDataManager {
         scope.launch {
             try {
                 AMSwidget().updateAll(context)
+                progresswidget().updateAll(context)
             } catch (e: Exception) {
                 Log.e("Bamboozled", "Widget update failed", e)
             }
@@ -272,7 +273,7 @@ fun HeaderSection(state: PrinterState, accentColor: Color, onSettingsClick: () -
         
         Surface(shape = RoundedCornerShape(24.dp), color = color.copy(alpha = 0.15f), modifier = Modifier.height(48.dp)) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text(text = if (status.startsWith("Connecte")) "Connected" else if (status.contains("Connecting")) "Connecting" else "Offline",
+                Text(text = if (status.startsWith("Connecte")) "Connected" else if (status.contains("Connecting")) "Connecting" else "printing",
                     style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = color)
             }
         }

@@ -41,15 +41,27 @@
         </service>
 
         <receiver
-            android:name=".BambuWidgetReceiver"
+            android:name=".AMSwidgetreciever"
             android:exported="true"
-            android:label="@string/widget_name">
+            android:label="@string/ams_widget_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/bambu_widget_info" />
+                android:resource="@xml/ams_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".progresswidgetreciever"
+            android:exported="true"
+            android:label="@string/progress_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/progress_widget_info" />
         </receiver>
 
         <provider
